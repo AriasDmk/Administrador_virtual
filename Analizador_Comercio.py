@@ -1,17 +1,15 @@
 import cv2
 import numpy as np
 from ultralytics import YOLO
+from deep_sort_realtime.deepsort_tracker import DeepSort
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
+from tkinter import ttk, simpledialog, messagebox
 from PIL import Image, ImageTk
 import threading
 import time
 import csv
 from datetime import datetime
 import os
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import threading
 
 class CameraHandler:
     def __init__(self):
@@ -37,50 +35,64 @@ class ZoneHandler:
         self.zones = {"entrada": [], "servicio": [], "salida": [], "personal": []}
         self.current_zone = []
         self.current_zone_type = "entrada"
+        self.zone_steps = [
+            ("entrada", "Paso 1: Indique la zona de entrada."),
+            ("servicio", "Paso 2: Indique la zona de servicio."),
+            ("personal", "Paso 3: Indique la zona del personal."),
+            ("salida", "Paso 4: Indique la zona de salida.")
+        ]
+        self.current_step = 0
 
     def define_zones(self, cap):
         if cap is None:
             messagebox.showerror("Error", "Por favor, seleccione una cámara primero.")
             return
 
+        ret, frame = cap.read()
+        if not ret:
+            messagebox.showerror("Error", "No se pudo leer de la cámara.")
+            return
+
+        frozen_frame = frame.copy()
+
         def on_mouse(event, x, y, flags, param):
+            nonlocal frozen_frame
             if event == cv2.EVENT_LBUTTONDOWN:
-                self.current_zone.append((x, y))
-            elif event == cv2.EVENT_RBUTTONDOWN:
-                if len(self.current_zone) > 2:
-                    self.zones[self.current_zone_type].append(np.array(self.current_zone, np.int32))
-                    self.current_zone = []
+                self.current_zone = [(x, y)]
+            elif event == cv2.EVENT_MOUSEMOVE and len(self.current_zone) == 1:
+                temp_frame = frozen_frame.copy()
+                x1, y1 = self.current_zone[0]
+                cv2.rectangle(temp_frame, (x1, y1), (x, y), (255, 0, 0), 2)
+                width = abs(x - x1)
+                height = abs(y - y1)
+                cv2.putText(temp_frame, f"{width}x{height}", (x1, y1 - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+                cv2.imshow("Definir Zonas", temp_frame)
+            elif event == cv2.EVENT_LBUTTONUP:
+                x1, y1 = self.current_zone[0]
+                self.zones[self.current_zone_type].append(((x1, y1), (x, y)))
+                self.current_zone = []
+                cv2.rectangle(frozen_frame, (x1, y1), (x, y), (255, 0, 0), 2)
+                width = abs(x - x1)
+                height = abs(y - y1)
+                cv2.putText(frozen_frame, f"{width}x{height}", (x1, y1 - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
 
         cv2.namedWindow("Definir Zonas")
         cv2.setMouseCallback("Definir Zonas", on_mouse)
 
         while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            for zone_type, zone_list in self.zones.items():
-                for zone in zone_list:
-                    cv2.polylines(frame, [zone], True, (0, 255, 0), 2)
-
-            if len(self.current_zone) > 1:
-                cv2.polylines(frame, [np.array(self.current_zone, np.int32)], False, (255, 0, 0), 2)
-
-            cv2.putText(frame, f"Definiendo zona de {self.current_zone_type}", (10, 30),
+            cv2.putText(frozen_frame, self.zone_steps[self.current_step][1], (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            cv2.putText(frame, "Clic izquierdo: añadir punto, Clic derecho: finalizar zona", (10, 60),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            cv2.putText(frame, "Presione 'n' para siguiente tipo de zona, 'q' para terminar", (10, 90),
+            cv2.putText(frozen_frame, "Arrastre para definir zona, 'n' para siguiente, 'q' para terminar", (10, 60),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
-            cv2.imshow("Definir Zonas", frame)
+            cv2.imshow("Definir Zonas", frozen_frame)
 
             key = cv2.waitKey(1) & 0xFF
             if key == ord('n'):
-                zone_types = list(self.zones.keys())
-                current_index = zone_types.index(self.current_zone_type)
-                self.current_zone_type = zone_types[(current_index + 1) % len(zone_types)]
-                self.current_zone = []
+                self.current_step = (self.current_step + 1) % len(self.zone_steps)
+                self.current_zone_type = self.zone_steps[self.current_step][0]
             elif key == ord('q'):
                 break
 
@@ -93,26 +105,25 @@ class RetailAnalyticsSystem:
         self.camera_handler = CameraHandler()
         self.zone_handler = ZoneHandler()
         self.is_running = False
-        self.customer_count = 0
-        self.staff_count = 0
-        self.customer_time = {}
-        self.staff_time = {}
+        self.counts = {"entrada": 0, "servicio": 0, "salida": 0, "personal": 0}
+        self.times = {"entrada": 0, "servicio": 0, "salida": 0, "personal": 0}
         self.current_frame = None
         self.csv_filename = "retail_analytics.csv"
         self.csv_interval = 300  # 5 minutes
         self.last_save_time = time.time()
-        self.fps = 0
-        self.last_frame_time = 0
         self.frame_count = 0
-        self.lock = threading.Lock()  # Lock for thread safety
+        self.lock = threading.Lock()
+
+        self.tracker = DeepSort(max_age=30, n_init=3, nn_budget=100)
+        self.tracked_objects = {}
 
         self.setup_gui()
         self.load_model()
 
     def setup_gui(self):
         self.root = tk.Tk()
-        self.root.title("Sistema Avanzado de Análisis de Retail")
-        self.root.geometry("1200x800")
+        self.root.title("Sistema de Análisis de Retail")
+        self.root.geometry("800x600")
 
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -131,45 +142,16 @@ class RetailAnalyticsSystem:
         self.start_button = ttk.Button(control_frame, text="Iniciar Análisis", command=self.toggle_analysis)
         self.start_button.pack(fill=tk.X, pady=5)
 
-        ttk.Label(control_frame, text="Intervalo de guardado (s):").pack(anchor=tk.W)
-        self.interval_entry = ttk.Entry(control_frame)
-        self.interval_entry.pack(fill=tk.X, pady=5)
-        self.interval_entry.insert(0, str(self.csv_interval))
-
-        ttk.Label(control_frame, text="Nombre archivo CSV:").pack(anchor=tk.W)
-        self.csv_name_entry = ttk.Entry(control_frame)
-        self.csv_name_entry.pack(fill=tk.X, pady=5)
-        self.csv_name_entry.insert(0, self.csv_filename)
-
-        self.stats_label = ttk.Label(control_frame, text="Clientes: 0 | Personal: 0")
-        self.stats_label.pack(pady=10)
-
-        self.fps_label = ttk.Label(control_frame, text="FPS: 0")
-        self.fps_label.pack(pady=5)
-
-        self.setup_graphs(control_frame)
-
-    def setup_graphs(self, parent):
-        fig, self.ax1 = plt.subplots(figsize=(4, 3))
-        self.occupancy_graph = FigureCanvasTkAgg(fig, master=parent)
-        self.occupancy_graph.get_tk_widget().pack(fill=tk.X, pady=10)
-        self.ax1.set_title("Ocupación del Local")
-        self.ax1.set_xlabel("Tiempo")
-        self.ax1.set_ylabel("Número de Personas")
-
-        fig, self.ax2 = plt.subplots(figsize=(4, 3))
-        self.time_graph = FigureCanvasTkAgg(fig, master=parent)
-        self.time_graph.get_tk_widget().pack(fill=tk.X, pady=10)
-        self.ax2.set_title("Tiempo Promedio de Estancia")
-        self.ax2.set_xlabel("Zona")
-        self.ax2.set_ylabel("Tiempo (minutos)")
+        self.stats_labels = {}
+        for zone in ["entrada", "servicio", "salida", "personal"]:
+            self.stats_labels[zone] = ttk.Label(control_frame, text=f"{zone.capitalize()}: 0 | Tiempo: 0.0 min")
+            self.stats_labels[zone].pack(pady=5)
 
     def load_model(self):
         try:
             self.model = YOLO('yolov8n.pt')
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo cargar el modelo: {e}")
-            self.is_running = False
 
     def toggle_analysis(self):
         if not self.is_running:
@@ -197,107 +179,97 @@ class RetailAnalyticsSystem:
         while self.is_running:
             ret, frame = self.camera_handler.cap.read()
             if not ret:
+                messagebox.showerror("Error", "No se pudo leer de la cámara.")
                 break
 
             self.frame_count += 1
-            if self.frame_count % 3 == 0:  # Procesar solo cada 3 fotogramas
+            if self.frame_count % 3 == 0:  # Procesar cada 3 fotogramas
                 with self.lock:
                     self.current_frame = frame.copy()
-                    results = self.model(frame)
-                    self.process_detections(results, frame)
+                    try:
+                        results = self.model(frame, size=320)
+                        self.process_detections(results, frame)
+                    except Exception as e:
+                        messagebox.showerror("Error", f"Error al procesar el modelo: {e}")
 
             self.update_display(frame)
             self.save_to_csv_if_needed()
-            self.update_fps()
+            self.update_stats()
 
         self.stop_analysis()
 
     def process_detections(self, results, frame):
-        detected_objects = results[0].boxes.data
-        current_time = time.time()
+        detections = results[0].boxes.data.cpu().numpy()
 
-        for obj in detected_objects:
-            x1, y1, x2, y2, conf, class_id = obj
-            if conf < 0.5:  # Umbral de confianza
-                continue
+        if not isinstance(detections, np.ndarray) or len(detections) == 0:
+            return
 
-            center_point = ((x1 + x2) / 2, (y1 + y2) / 2)
-            is_staff = self.is_in_zone(center_point, self.zone_handler.zones["personal"])
-            person_id = f"{'staff' if is_staff else 'customer'}_{len(self.staff_time if is_staff else self.customer_time)}"
+        bboxes = []
+        for det in detections:
+            x1, y1, x2, y2, conf, class_id = det
+            if conf > 0.5 and int(class_id) == 0:  # Solo rastreamos personas (ID clase 0)
+                cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+                w, h = x2 - x1, y2 - y1
+                bboxes.append([cx, cy, w, h, conf])
 
-            if is_staff:
-                if person_id not in self.staff_time:
-                    self.staff_time[person_id] = {"start": current_time, "zones": set()}
-                self.staff_time[person_id]["last_seen"] = current_time
-                self.staff_count = len(self.staff_time)
-            else:
-                if person_id not in self.customer_time:
-                    self.customer_time[person_id] = {"start": current_time, "zones": set()}
-                self.customer_time[person_id]["last_seen"] = current_time
-                self.customer_count = len(self.customer_time)
+        if len(bboxes) > 0:
+            tracks = self.tracker.update_tracks(bboxes, frame=frame)
 
-            for zone_type in ["entrada", "servicio", "salida"]:
-                if self.is_in_zone(center_point, self.zone_handler.zones[zone_type]):
-                    if is_staff:
-                        self.staff_time[person_id]["zones"].add(zone_type)
-                    else:
-                        self.customer_time[person_id]["zones"].add(zone_type)
+            current_time = time.time()
 
-            # Dibujar bounding box y etiqueta
-            color = (0, 255, 0) if is_staff else (255, 0, 0)
-            cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
-            cv2.putText(frame, f"{'Staff' if is_staff else 'Customer'}", (int(x1), int(y1) - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            for track in tracks:
+                if not track.is_confirmed():
+                    continue
 
-        self.update_stats()
+                bbox = track.to_tlbr()
+                track_id = track.track_id
+                x1, y1, x2, y2 = bbox
+                center_point = ((x1 + x2) / 2, (y1 + y2) / 2)
+
+                person_id = f"Persona_{int(track_id)}"
+
+                if person_id not in self.tracked_objects:
+                    self.tracked_objects[person_id] = {
+                        "start_time": current_time,
+                        "last_seen": current_time,
+                        "zone": None
+                    }
+                else:
+                    self.tracked_objects[person_id]["last_seen"] = current_time
+
+                for zone_type in self.zone_handler.zones:
+                    if self.is_in_zone(center_point, self.zone_handler.zones[zone_type]):
+                        if self.tracked_objects[person_id]["zone"] != zone_type:
+                            self.tracked_objects[person_id]["zone"] = zone_type
+                            self.counts[zone_type] += 1
+                        break
+
+                cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+                cv2.putText(frame, person_id, (int(x1), int(y1) - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+        self.update_times()
+        def update_times(self):
+           current_time = time.time()
+        for person_id, data in list(self.tracked_objects.items()):
+            if current_time - data["last_seen"] > 5:
+                if data["zone"]:
+                    self.times[data["zone"]] += current_time - data["start_time"]
+                del self.tracked_objects[person_id]
+            elif data["zone"]:
+                self.times[data["zone"]] += current_time - data["last_seen"]
+                data["last_seen"] = current_time
 
     def is_in_zone(self, point, zones):
-        point = np.array(point, dtype=np.float32)
-        for zone in zones:
-            zone = np.array(zone, dtype=np.int32)
-            if cv2.pointPolygonTest(zone, point, False) >= 0:
+        for (p1, p2) in zones:
+            if p1[0] <= point[0] <= p2[0] and p1[1] <= point[1] <= p2[1]:
                 return True
         return False
 
     def update_stats(self):
-        self.stats_label.config(text=f"Clientes: {self.customer_count} | Personal: {self.staff_count}")
-        self.update_occupancy_graph()
-        self.update_time_graph()
-
-    def update_occupancy_graph(self):
-        self.ax1.clear()
-        self.ax1.plot([0, 1, 2, 3, 4], [0, self.customer_count, self.customer_count * 0.8, self.customer_count * 1.2, self.customer_count])
-        self.ax1.set_title("Ocupación del Local")
-        self.ax1.set_xlabel("Tiempo")
-        self.ax1.set_ylabel("Número de Personas")
-        self.occupancy_graph.draw()
-
-    def update_time_graph(self):
-        self.ax2.clear()
-        zones = ["entrada", "servicio", "salida"]
-        customer_avg_times = [self.calculate_average_time(zone, is_staff=False) for zone in zones]
-        staff_avg_times = [self.calculate_average_time(zone, is_staff=True) for zone in zones]
-
-        x = np.arange(len(zones))
-        width = 0.35
-
-        self.ax2.bar(x - width / 2, customer_avg_times, width, label='Clientes')
-        self.ax2.bar(x + width / 2, staff_avg_times, width, label='Personal')
-
-        self.ax2.set_title("Tiempo Promedio de Estancia")
-        self.ax2.set_xlabel("Zona")
-        self.ax2.set_ylabel("Tiempo (minutos)")
-        self.ax2.set_xticks(x)
-        self.ax2.set_xticklabels(zones)
-        self.ax2.legend()
-
-        self.time_graph.draw()
-
-    def calculate_average_time(self, zone, is_staff=False):
-        time_data = self.staff_time if is_staff else self.customer_time
-        total_time = sum(time.time() - data["start"] for data in time_data.values() if zone in data["zones"])
-        count = sum(1 for data in time_data.values() if zone in data["zones"])
-        return total_time / count / 60 if count > 0 else 0  # Convertir a minutos
+        for zone in self.counts:
+            avg_time = self.times[zone] / self.counts[zone] / 60 if self.counts[zone] > 0 else 0
+            self.stats_labels[zone].config(text=f"{zone.capitalize()}: {self.counts[zone]} | Tiempo: {avg_time:.2f} min")
 
     def update_display(self, frame):
         image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -314,17 +286,11 @@ class RetailAnalyticsSystem:
 
     def save_to_csv(self):
         current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        data = [
-            current_datetime,
-            self.customer_count,
-            self.staff_count,
-            self.calculate_average_time("entrada", False),
-            self.calculate_average_time("servicio", False),
-            self.calculate_average_time("salida", False),
-            self.calculate_average_time("entrada", True),
-            self.calculate_average_time("servicio", True),
-            self.calculate_average_time("salida", True)
-        ]
+        data = [current_datetime]
+        for zone in ["entrada", "servicio", "salida", "personal"]:
+            avg_time = self.times[zone] / self.counts[zone] / 60 if self.counts[zone] > 0 else 0
+            data.extend([self.counts[zone], f"{avg_time:.2f}"])
+        
         try:
             with open(self.csv_filename, mode='a', newline='') as file:
                 writer = csv.writer(file)
@@ -332,14 +298,15 @@ class RetailAnalyticsSystem:
         except IOError as e:
             messagebox.showerror("Error", f"Error al guardar el archivo CSV: {e}")
 
-    def update_fps(self):
-        current_time = time.time()
-        self.fps = 1 / (current_time - self.last_frame_time)
-        self.last_frame_time = current_time
-        self.fps_label.config(text=f"FPS: {self.fps:.2f}")
-
     def run(self):
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.root.mainloop()
+
+    def on_closing(self):
+        if messagebox.askokcancel("Salir", "¿Está seguro que desea salir?"):
+            self.is_running = False
+            self.camera_handler.release_camera()
+            self.root.destroy()
 
 if __name__ == "__main__":
     app = RetailAnalyticsSystem()
