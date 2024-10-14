@@ -15,14 +15,15 @@ class PeopleCounter:
         self.model = None
         self.cap = None
         self.is_running = False
-        self.person_tracker = {}
-        self.detection_areas = []  # Múltiples áreas de detección
+        self.person_tracker = {}  # Key: track_id, Value: dict with zone info
+        self.detection_areas = []  # Multiple detection areas
         self.confidence_threshold = 0.5
         self.csv_filename = "people_counter.csv"
-        self.csv_interval = 300  # Guardar cada 5 minutos
+        self.csv_interval = 300  # Save every 5 minutes
         self.last_save_time = time.time()
-        self.counts = {}
-        self.times = {}
+        self.counts = {}  # Counts per zone
+        self.times = {}   # Total time per zone
+        self.counted_ids_per_zone = {}  # IDs counted per zone
         self.setup_gui()
 
     def setup_gui(self):
@@ -75,6 +76,7 @@ class PeopleCounter:
         self.detection_areas = []
         self.area_names = []
         self.stats_labels = {}
+        self.counted_ids_per_zone = {}
 
         def on_mouse(event, x, y, flags, param):
             nonlocal frozen_frame
@@ -102,18 +104,15 @@ class PeopleCounter:
                 zone_name = simpledialog.askstring("Nombre de la Zona", "Ingrese el nombre para esta zona:")
                 if zone_name:
                     self.area_names.append(zone_name)
-                    label = ttk.Label(self.root, text=f"{zone_name}: 0 | Tiempo: 0.0 min")
-                    label.pack(pady=5)
-                    self.stats_labels[zone_name] = label
-                    self.counts[zone_name] = 0
-                    self.times[zone_name] = 0.0
                 else:
-                    self.area_names.append(f"Zona {len(self.area_names) + 1}")
-                    label = ttk.Label(self.root, text=f"Zona {len(self.area_names)}: 0 | Tiempo: 0.0 min")
-                    label.pack(pady=5)
-                    self.stats_labels[self.area_names[-1]] = label
-                    self.counts[self.area_names[-1]] = 0
-                    self.times[self.area_names[-1]] = 0.0
+                    zone_name = f"Zona {len(self.area_names) + 1}"
+                    self.area_names.append(zone_name)
+                label = ttk.Label(self.root, text=f"{zone_name}: 0 | Tiempo: 0.0 min")
+                label.pack(pady=5)
+                self.stats_labels[zone_name] = label
+                self.counts[zone_name] = 0
+                self.times[zone_name] = 0.0
+                self.counted_ids_per_zone[zone_name] = set()
 
         cv2.namedWindow("Definir Zonas")
         cv2.setMouseCallback("Definir Zonas", on_mouse)
@@ -201,8 +200,10 @@ class PeopleCounter:
 
                 if track_id not in self.person_tracker:
                     self.person_tracker[track_id] = {
+                        'zones': {},  # key: zone_name, value: total_time_in_zone
                         'current_zone': None,
                         'zone_entry_time': None,
+                        'captured_zones': set(),  # Zonas donde se ha capturado imagen
                     }
 
                 person_data = self.person_tracker[track_id]
@@ -210,25 +211,34 @@ class PeopleCounter:
                 # Verificar si está dentro de una zona
                 inside_zone = False
                 for zone_index, (zx, zy, zw, zh) in enumerate(self.detection_areas):
+                    zone_name = self.area_names[zone_index]
                     if zx <= cx <= zx + zw and zy <= cy <= zy + zh:
-                        zone_name = self.area_names[zone_index]
                         inside_zone = True
                         if person_data['current_zone'] != zone_name:
                             # Ingresó a una nueva zona
                             person_data['current_zone'] = zone_name
                             person_data['zone_entry_time'] = current_time
-                            self.counts[zone_name] += 1
+                            if track_id not in self.counted_ids_per_zone[zone_name]:
+                                self.counts[zone_name] += 1
+                                self.counted_ids_per_zone[zone_name].add(track_id)
                         else:
                             # Sigue en la misma zona
                             time_in_zone = current_time - person_data['zone_entry_time']
+                            total_time_in_zone = person_data['zones'].get(zone_name, 0) + time_in_zone
                             # Mostrar el tiempo en la etiqueta
-                            cv2.putText(frame, f"ID: {track_id} | Tiempo: {int(time_in_zone)}s", (x1, y1 - 10),
+                            cv2.putText(frame, f"ID: {track_id} | Tiempo: {int(total_time_in_zone)}s", (x1, y1 - 10),
                                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+                            # Si supera 60 segundos y no se ha capturado imagen
+                            if total_time_in_zone >= 60 and zone_name not in person_data['captured_zones']:
+                                self.capture_image(frame, track_id, zone_name)
+                                person_data['captured_zones'].add(zone_name)
                         break
                 if not inside_zone and person_data['current_zone'] is not None:
                     # Salió de la zona
                     time_spent = current_time - person_data['zone_entry_time']
                     zone_name = person_data['current_zone']
+                    # Actualizar tiempo total en la zona
+                    person_data['zones'][zone_name] = person_data['zones'].get(zone_name, 0) + time_spent
                     self.times[zone_name] += time_spent
                     person_data['current_zone'] = None
                     person_data['zone_entry_time'] = None
@@ -239,21 +249,29 @@ class PeopleCounter:
                     # Mostrar solo el ID
                     cv2.putText(frame, f"ID: {track_id}", (x1, y1 - 10),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
-            # No se muestra la confianza
-
         # Eliminar rastros antiguos
         old_ids = set(self.person_tracker.keys()) - current_ids
         for old_id in old_ids:
             person_data = self.person_tracker[old_id]
             if person_data['current_zone'] is not None:
-                # Actualizar tiempo en zona
+                # Salió de la zona sin actualizar
                 time_spent = current_time - person_data['zone_entry_time']
                 zone_name = person_data['current_zone']
+                # Actualizar tiempo total en la zona
+                person_data['zones'][zone_name] = person_data['zones'].get(zone_name, 0) + time_spent
                 self.times[zone_name] += time_spent
             del self.person_tracker[old_id]
 
         # Actualizar estadísticas
         self.update_stats()
+
+    def capture_image(self, frame, track_id, zone_name):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"captura_{zone_name}_ID{track_id}_{timestamp}.jpg"
+        folder_path = os.path.join("capturas", zone_name)
+        os.makedirs(folder_path, exist_ok=True)
+        cv2.imwrite(os.path.join(folder_path, filename), frame)
+        print(f"Captura guardada: {filename}")
 
     def draw_detection_areas(self, frame):
         for idx, (x, y, w, h) in enumerate(self.detection_areas):
@@ -312,4 +330,3 @@ class PeopleCounter:
 if __name__ == "__main__":
     counter = PeopleCounter()
     counter.run()
-
