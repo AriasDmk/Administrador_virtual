@@ -1,0 +1,12 @@
+# Ignorar la carpeta de capturas
+capturas/
+
+# Ignorar el entorno virtual
+venv/
+
+# Ignorar archivos compilados de Python
+*.pyc
+__pycache__/
+
+# Ignorar el archivo CSV generado
+people_counter.csv
