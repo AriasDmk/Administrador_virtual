@@ -10,3 +10,6 @@ __pycache__/
 
 # Ignorar el archivo CSV generado
 people_counter.csv
+
+# Ignorar los  archivos yolo
+*.pt
