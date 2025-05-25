@@ -280,8 +280,8 @@ class PeopleCounter:
     def draw_detection_areas(self, frame):
         for idx, (x, y, w, h) in enumerate(self.detection_areas):
             zone_name = self.area_names[idx]
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 2)
-            cv2.putText(frame, f"{zone_name}", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 255, 255), 1)
+            cv2.putText(frame, f"{zone_name}", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
     def update_stats(self):
         for zone in self.counts:
