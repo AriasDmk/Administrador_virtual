@@ -12,12 +12,17 @@ import os
 
 class PeopleCounter:
     def __init__(self):
+        # Variables para ajustes configurables
+        self.model_name = "yolov8n.pt"  # Modelo YOLO por defecto
+        self.confidence_threshold = 0.5  # Umbral de confianza mínimo
+        self.classes_to_detect = [0]  # Clases a detectar (por defecto, personas)
+        self.frame_skip = 1  # Procesar cada N frames (para mejorar rendimiento)
+
         self.model = None
         self.cap = None
         self.is_running = False
         self.person_tracker = {}  # Key: track_id, Value: dict with zone info
         self.detection_areas = []  # Multiple detection areas
-        self.confidence_threshold = 0.5
         self.csv_filename = "people_counter.csv"
         self.csv_interval = 300  # Save every 5 minutes
         self.last_save_time = time.time()
@@ -25,12 +30,6 @@ class PeopleCounter:
         self.times = {}   # Total time per zone
         self.counted_ids_per_zone = {}  # IDs counted per zone
         self.setup_gui()
-
-        # Variables para ajustes configurables
-        self.model_name = "yolov8n.pt"  # Modelo YOLO por defecto
-        self.confidence_threshold = 0.5  # Umbral de confianza mínimo
-        self.classes_to_detect = [0]  # Clases a detectar (por defecto, personas)
-        self.frame_skip = 1  # Procesar cada N frames (para mejorar rendimiento)
 
     def setup_gui(self):
         self.root = tk.Tk()
