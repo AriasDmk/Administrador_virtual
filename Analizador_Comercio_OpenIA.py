@@ -64,7 +64,7 @@ class PeopleCounter:
     def select_camera(self):
         camera_index = simpledialog.askinteger("Seleccionar Cámara", "Ingrese el índice de la cámara:", initialvalue=0)
         if camera_index is not None:
-            try:
+            try: 
                 self.cap = cv2.VideoCapture(camera_index)
                 if not self.cap.isOpened():
                     raise ValueError("No se pudo abrir la cámara seleccionada.")
