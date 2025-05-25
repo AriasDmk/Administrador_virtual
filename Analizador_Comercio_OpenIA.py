@@ -26,6 +26,12 @@ class PeopleCounter:
         self.counted_ids_per_zone = {}  # IDs counted per zone
         self.setup_gui()
 
+        # Variables para ajustes configurables
+        self.model_name = "yolov8n.pt"  # Modelo YOLO por defecto
+        self.confidence_threshold = 0.5  # Umbral de confianza mínimo
+        self.classes_to_detect = [0]  # Clases a detectar (por defecto, personas)
+        self.frame_skip = 1  # Procesar cada N frames (para mejorar rendimiento)
+
     def setup_gui(self):
         self.root = tk.Tk()
         self.root.title("Contador de Personas con Seguimiento")
@@ -42,7 +48,7 @@ class PeopleCounter:
         ttk.Label(control_frame, text="Seleccionar Modelo YOLO:").pack(anchor=tk.W)
         self.model_combo = ttk.Combobox(control_frame, values=["yolov8n.pt", "yolov8s.pt", "yolov8m.pt", "yolov8l.pt", "yolov8x.pt"])
         self.model_combo.pack(fill=tk.X, pady=5)
-        self.model_combo.set("yolov8n.pt")
+        self.model_combo.set(self.model_name)
         self.start_button = ttk.Button(control_frame, text="Iniciar Conteo", command=self.toggle_counting)
         self.start_button.pack(fill=tk.X, pady=5)
 
@@ -50,7 +56,11 @@ class PeopleCounter:
 
         # Agregar barra de estado con copyright
         self.status_bar = ttk.Label(self.root, text="Creado por AriasDmk © 2025", relief=tk.SUNKEN, anchor=tk.W)
-        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X) # Posicionar abajo y expandir horizontalmente
+        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Botón para abrir la ventana de ajustes
+        self.settings_button = ttk.Button(control_frame, text="Ajustes", command=self.open_settings_window)
+        self.settings_button.pack(fill=tk.X, pady=5)
 
     def select_camera(self):
         camera_index = simpledialog.askinteger("Seleccionar Cámara", "Ingrese el índice de la cámara:", initialvalue=0)
@@ -136,6 +146,59 @@ class PeopleCounter:
         cv2.destroyWindow("Definir Zonas")
         messagebox.showinfo("Zonas Definidas", "Las zonas han sido definidas correctamente.")
 
+    def open_settings_window(self):
+        # Abre una nueva ventana para los ajustes
+        self.settings_window = tk.Toplevel(self.root)
+        self.settings_window.title("Ajustes")
+
+        # Combobox para seleccionar el modelo YOLO
+        ttk.Label(self.settings_window, text="Modelo YOLO:").grid(row=0, column=0, padx=5, pady=5)
+        self.model_combo_setting = ttk.Combobox(self.settings_window, values=["yolov8n.pt", "yolov8s.pt", "yolov8m.pt", "yolov8l.pt", "yolov8x.pt"])
+        self.model_combo_setting.grid(row=0, column=1, padx=5, pady=5)
+        self.model_combo_setting.set(self.model_name)
+
+        # Campo para ingresar el umbral de confianza mínimo
+        ttk.Label(self.settings_window, text="Confianza mínima:").grid(row=1, column=0, padx=5, pady=5)
+        self.confidence_entry_setting = ttk.Entry(self.settings_window)
+        self.confidence_entry_setting.grid(row=1, column=1, padx=5, pady=5)
+        self.confidence_entry_setting.insert(0, str(self.confidence_threshold))
+
+        # Combobox para seleccionar la clase a detectar y contar
+        ttk.Label(self.settings_window, text="Detectar y contar:").grid(row=2, column=0, padx=5, pady=5)
+        self.detect_combo_setting = ttk.Combobox(self.settings_window, values=["person", "car", "motorcycle"])
+        self.detect_combo_setting.grid(row=2, column=1, padx=5, pady=5)
+        # Diccionario inverso para obtener el nombre de la clase actual
+        class_dict_inv = {0: 'person', 2: 'car', 3: 'motorcycle'}
+        current_class_id = self.classes_to_detect[0] if self.classes_to_detect else 0
+        self.detect_combo_setting.set(class_dict_inv.get(current_class_id, 'person'))
+
+        # Campo para ingresar cada cuántos frames procesar
+        ttk.Label(self.settings_window, text="Procesar cada N frames:").grid(row=3, column=0, padx=5, pady=5)
+        self.frame_skip_entry = ttk.Entry(self.settings_window)
+        self.frame_skip_entry.grid(row=3, column=1, padx=5, pady=5)
+        self.frame_skip_entry.insert(0, str(self.frame_skip))
+
+        # Botones para guardar o cancelar los ajustes
+        ttk.Button(self.settings_window, text="Guardar", command=self.save_settings).grid(row=4, column=0, padx=5, pady=5)
+        ttk.Button(self.settings_window, text="Cancelar", command=self.settings_window.destroy).grid(row=4, column=1, padx=5, pady=5)
+
+    def save_settings(self):
+        # Guarda los ajustes ingresados por el usuario
+        try:
+            self.model_name = self.model_combo_setting.get()
+            self.confidence_threshold = float(self.confidence_entry_setting.get())
+
+            # Actualizamos la clase a detectar
+            class_name = self.detect_combo_setting.get()
+            class_dict = {'person': 0, 'car': 2, 'motorcycle': 3}
+            self.classes_to_detect = [class_dict.get(class_name, 0)]
+
+            self.frame_skip = int(self.frame_skip_entry.get())
+
+            self.settings_window.destroy()  # Cerramos la ventana de ajustes
+        except ValueError:
+            messagebox.showerror("Error", "Por favor, ingrese valores válidos.")
+
     def toggle_counting(self):
         if not self.is_running:
             self.start_counting()
@@ -144,9 +207,14 @@ class PeopleCounter:
 
     def start_counting(self):
         try:
-            model_path = self.model_combo.get()
-            if not model_path:
-                model_path = "yolov8n.pt"
+            model_path = self.model_combo.get() # Usar self.model_combo de la ventana principal
+            if not model_path: # Fallback si no se seleccionó en la principal
+                 model_path = self.model_name
+
+            if not os.path.exists(model_path):
+                 messagebox.showerror("Error", f"El archivo de modelo {model_path} no se encuentra. Asegúrese de descargarlo.")
+                 return
+
             self.model = YOLO(model_path)
             if self.cap is None:
                 print("Error: Por favor, seleccione una cámara primero.")
@@ -157,6 +225,7 @@ class PeopleCounter:
             threading.Thread(target=self.process_video, daemon=True).start()
         except Exception as e:
             print(f"Error al iniciar el conteo: {e}")
+            messagebox.showerror("Error", f"Error al iniciar el conteo: {e}")
 
     def stop_counting(self):
         self.is_running = False
@@ -169,7 +238,20 @@ class PeopleCounter:
             success, frame = self.cap.read()
             if success:
                 frame = cv2.flip(frame, 1)
-                results = self.model.track(frame, persist=True, conf=self.confidence_threshold, classes=[0])
+
+                # Aplicar preprocesamiento si se define un área de detección (opcional, podría ser configurable)
+                # if self.detection_areas:
+                #     frame = self.preprocess_frame(frame)
+
+                # Realizar detección con ajustes configurados
+                results = self.model.track(
+                    frame, 
+                    persist=True, 
+                    conf=self.confidence_threshold, 
+                    classes=self.classes_to_detect,
+                    iou=0.5 # Ajustar IoU para NMS si es necesario
+                    )
+
                 annotated_frame = frame.copy()
 
                 self.track_people(results[0].boxes, annotated_frame)
@@ -202,7 +284,7 @@ class PeopleCounter:
                 x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
                 cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
 
-                if track_id not in self.person_tracker:
+                if track_id not in self.person_tracker: # Initialize tracker data for new ID
                     self.person_tracker[track_id] = {
                         'zones': {},  # key: zone_name, value: total_time_in_zone
                         'current_zone': None,
@@ -222,18 +304,19 @@ class PeopleCounter:
                             # Ingresó a una nueva zona
                             person_data['current_zone'] = zone_name
                             person_data['zone_entry_time'] = current_time
-                            if track_id not in self.counted_ids_per_zone[zone_name]:
-                                self.counts[zone_name] += 1
+                            if track_id not in self.counted_ids_per_zone.get(zone_name, set()): # Check if zone exists
+                                self.counts[zone_name] = self.counts.get(zone_name, 0) + 1 # Ensure zone count exists
+                                self.counted_ids_per_zone[zone_name] = self.counted_ids_per_zone.get(zone_name, set()) # Ensure zone set exists
                                 self.counted_ids_per_zone[zone_name].add(track_id)
                         else:
                             # Sigue en la misma zona
                             time_in_zone = current_time - person_data['zone_entry_time']
                             total_time_in_zone = person_data['zones'].get(zone_name, 0) + time_in_zone
                             # Mostrar el tiempo en la etiqueta
-                            cv2.putText(frame, f"ID: {track_id} | Tiempo: {int(total_time_in_zone)}s", (x1, y1 - 10),
+                            cv2.putText(frame, f"ID: {track_id} | Tiempo: {int(time_in_zone)}s", (x1, y1 - 10),
                                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
                             # Si supera 60 segundos y no se ha capturado imagen
-                            if total_time_in_zone >= 60 and zone_name not in person_data['captured_zones']:
+                            if time_in_zone >= 60 and zone_name not in person_data['captured_zones']:
                                 self.capture_image(frame, track_id, zone_name)
                                 person_data['captured_zones'].add(zone_name)
                         break
@@ -243,7 +326,7 @@ class PeopleCounter:
                     zone_name = person_data['current_zone']
                     # Actualizar tiempo total en la zona
                     person_data['zones'][zone_name] = person_data['zones'].get(zone_name, 0) + time_spent
-                    self.times[zone_name] += time_spent
+                    self.times[zone_name] = self.times.get(zone_name, 0) + time_spent # Ensure zone time exists
                     person_data['current_zone'] = None
                     person_data['zone_entry_time'] = None
 
@@ -263,7 +346,7 @@ class PeopleCounter:
                 zone_name = person_data['current_zone']
                 # Actualizar tiempo total en la zona
                 person_data['zones'][zone_name] = person_data['zones'].get(zone_name, 0) + time_spent
-                self.times[zone_name] += time_spent
+                self.times[zone_name] = self.times.get(zone_name, 0) + time_spent # Ensure zone time exists
             del self.person_tracker[old_id]
 
         # Actualizar estadísticas
@@ -280,6 +363,7 @@ class PeopleCounter:
     def draw_detection_areas(self, frame):
         for idx, (x, y, w, h) in enumerate(self.detection_areas):
             zone_name = self.area_names[idx]
+            # Cambiar color a blanco (255, 255, 255) y grosor de línea a 1
             cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 255, 255), 1)
             cv2.putText(frame, f"{zone_name}", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
@@ -305,8 +389,8 @@ class PeopleCounter:
         current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         data = [current_datetime]
         for zone in self.area_names:
-            total_time = self.times[zone] / 60  # Convertir a minutos
-            data.extend([self.counts[zone], f"{total_time:.2f}"])
+            total_time = self.times.get(zone, 0) / 60  # Ensure zone time exists and convert to minutes
+            data.extend([self.counts.get(zone, 0), f"{total_time:.2f}"]) # Ensure zone count exists
         headers = ["Fecha y Hora"]
         for zone in self.area_names:
             headers.extend([f"Conteo {zone}", f"Tiempo {zone} (min)"])
@@ -327,7 +411,7 @@ class PeopleCounter:
     def on_closing(self):
         if messagebox.askokcancel("Salir", "¿Está seguro que desea salir?"):
             self.is_running = False
-            if self.cap:
+            if self.cap: # Check if cap is initialized before releasing
                 self.cap.release()
             self.root.destroy()
 
