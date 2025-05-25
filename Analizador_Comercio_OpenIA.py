@@ -48,6 +48,10 @@ class PeopleCounter:
 
         self.stats_labels = {}
 
+        # Agregar barra de estado con copyright
+        self.status_bar = ttk.Label(self.root, text="Creado por AriasDmk © 2025", relief=tk.SUNKEN, anchor=tk.W)
+        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X) # Posicionar abajo y expandir horizontalmente
+
     def select_camera(self):
         camera_index = simpledialog.askinteger("Seleccionar Cámara", "Ingrese el índice de la cámara:", initialvalue=0)
         if camera_index is not None:
