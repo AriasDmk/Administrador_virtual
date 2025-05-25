@@ -231,7 +231,7 @@ class PeopleCounter:
                             total_time_in_zone = person_data['zones'].get(zone_name, 0) + time_in_zone
                             # Mostrar el tiempo en la etiqueta
                             cv2.putText(frame, f"ID: {track_id} | Tiempo: {int(total_time_in_zone)}s", (x1, y1 - 10),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
                             # Si supera 60 segundos y no se ha capturado imagen
                             if total_time_in_zone >= 60 and zone_name not in person_data['captured_zones']:
                                 self.capture_image(frame, track_id, zone_name)
