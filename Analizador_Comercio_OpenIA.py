@@ -59,7 +59,7 @@ class PeopleCounter:
 
         # Botón para abrir la ventana de ajustes
         self.settings_button = ttk.Button(control_frame, text="Ajustes", command=self.open_settings_window)
-        self.settings_button.pack(fill=tk.X, pady=5)
+        self.settings_button.pack(fill=tk.X, pady=5) 
 
     def select_camera(self):
         camera_index = simpledialog.askinteger("Seleccionar Cámara", "Ingrese el índice de la cámara:", initialvalue=0)
