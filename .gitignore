@@ -1,15 +1,106 @@
-# Ignorar la carpeta de capturas
-capturas/
+# Analizador de Comercio OpenIA - .gitignore
 
-# Ignorar el entorno virtual
+# Entorno virtual
+.venv/
 venv/
+env/
+ENV/
 
-# Ignorar archivos compilados de Python
-*.pyc
+# Archivos compilados Python
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
 
-# Ignorar el archivo CSV generado
+# Distribución / empaquetado
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unidades de prueba / cobertura
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# Archivos de entorno
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Sistema operativo
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Archivos de log
+*.log
+logs/
+
+# Archivos temporales
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Datos generados por la aplicación
 people_counter.csv
+capturas/
+*.jpg
+*.jpeg
+*.png
+*.mp4
+*.avi
+*.mov
 
-# Ignorar los  archivos yolo
-*.pt
+# Modelos grandes (opcional - descomenta si no quieres subirlos)
+# *.pt
+# yolov8*.pt
+
+# Archivos de configuración local
+config.ini
+settings.json

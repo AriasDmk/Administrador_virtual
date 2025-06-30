@@ -10,6 +10,36 @@ import csv
 from datetime import datetime
 import os
 
+# Nueva clase Tooltip para ventanas de información emergente
+class Tooltip:
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tooltip_window = None
+        self.widget.bind("<Enter>", self.show_tooltip)
+        self.widget.bind("<Leave>", self.hide_tooltip)
+
+    def show_tooltip(self, event=None):
+        if self.tooltip_window:
+            return
+        x, y, cx, cy = self.widget.bbox("insert")
+        x += self.widget.winfo_rootx() + 25
+        y += self.widget.winfo_rooty() + 20
+
+        self.tooltip_window = tk.Toplevel(self.widget)
+        self.tooltip_window.wm_overrideredirect(True)
+        self.tooltip_window.wm_geometry(f"+{x}+{y}")
+
+        label = tk.Label(self.tooltip_window, text=self.text, justify=tk.LEFT,
+                         background="#ffffe0", relief=tk.SOLID, borderwidth=1,
+                         font=("tahoma", "8", "normal"))
+        label.pack(ipadx=1)
+
+    def hide_tooltip(self, event=None):
+        if self.tooltip_window:
+            self.tooltip_window.destroy()
+        self.tooltip_window = None
+
 class PeopleCounter:
     def __init__(self):
         # Variables para ajustes configurables
@@ -59,19 +89,31 @@ class PeopleCounter:
 
         # Botón para abrir la ventana de ajustes
         self.settings_button = ttk.Button(control_frame, text="Ajustes", command=self.open_settings_window)
-        self.settings_button.pack(fill=tk.X, pady=5) 
+        self.settings_button.pack(fill=tk.X, pady=5)
 
     def select_camera(self):
-        camera_index = simpledialog.askinteger("Seleccionar Cámara", "Ingrese el índice de la cámara:", initialvalue=0)
-        if camera_index is not None:
+        # Usar askstring para permitir URL o índice numérico
+        camera_input = simpledialog.askstring("Seleccionar Fuente de Video", "Ingrese el índice de la cámara local (ej: 0) o la URL de la cámara IP (ej: rtsp://user:pass@ip:port/stream)")
+
+        if camera_input is not None:
+            try:
+                # Intentar convertir la entrada a un entero (índice de cámara local)
+                camera_source = int(camera_input)
+                print(f"Intentando abrir cámara local con índice: {camera_source}")
+            except ValueError:
+                # Si falla, tratar la entrada como una URL de cámara IP
+                camera_source = camera_input
+                print(f"Intentando abrir cámara IP con URL: {camera_source}")
+
             try: 
-                self.cap = cv2.VideoCapture(camera_index)
+                self.cap = cv2.VideoCapture(camera_source)
                 if not self.cap.isOpened():
-                    raise ValueError("No se pudo abrir la cámara seleccionada.")
-                print(f"Cámara {camera_index} seleccionada correctamente.")
-                messagebox.showinfo("Éxito", f"Cámara {camera_index} seleccionada correctamente.")
+                    raise ValueError(f"No se pudo abrir la fuente de video: {camera_input}.")
+                print(f"Fuente de video {camera_input} seleccionada correctamente.")
+                messagebox.showinfo("Éxito", f"Fuente de video {camera_input} seleccionada correctamente.")
             except Exception as e:
-                print(f"Error: No se pudo seleccionar la cámara: {e}")
+                print(f"Error: No se pudo seleccionar la fuente de video: {e}")
+                messagebox.showerror("Error", f"Error al seleccionar la fuente de video: {e}")
 
     def select_detection_areas(self):
         if self.cap is None:
@@ -151,31 +193,39 @@ class PeopleCounter:
         self.settings_window.title("Ajustes")
 
         # Combobox para seleccionar el modelo YOLO
-        ttk.Label(self.settings_window, text="Modelo YOLO:").grid(row=0, column=0, padx=5, pady=5)
+        model_label = ttk.Label(self.settings_window, text="Modelo YOLO:")
+        model_label.grid(row=0, column=0, padx=5, pady=5)
         self.model_combo_setting = ttk.Combobox(self.settings_window, values=["yolov8n.pt", "yolov8s.pt", "yolov8m.pt", "yolov8l.pt", "yolov8x.pt"])
         self.model_combo_setting.grid(row=0, column=1, padx=5, pady=5)
         self.model_combo_setting.set(self.model_name)
+        Tooltip(model_label, "Seleccione el modelo YOLO a utilizar. Modelos como 'n' (nano) son más rápidos pero menos precisos.\nModelos como 'x' (xlarge) son más precisos pero requieren más recursos.\nElija según el rendimiento de su hardware.")
 
         # Campo para ingresar el umbral de confianza mínimo
-        ttk.Label(self.settings_window, text="Confianza mínima:").grid(row=1, column=0, padx=5, pady=5)
+        confidence_label = ttk.Label(self.settings_window, text="Confianza mínima:")
+        confidence_label.grid(row=1, column=0, padx=5, pady=5)
         self.confidence_entry_setting = ttk.Entry(self.settings_window)
         self.confidence_entry_setting.grid(row=1, column=1, padx=5, pady=5)
         self.confidence_entry_setting.insert(0, str(self.confidence_threshold))
+        Tooltip(confidence_label, "Establece el umbral de confianza mínimo para considerar una detección válida.\nEl valor debe estar entre 0.0 y 1.0.\nValores más bajos (ej: 0.2) detectarán más objetos (posibles falsos positivos). Valores más altos (ej: 0.8) solo detectarán objetos con alta certeza.")
 
         # Combobox para seleccionar la clase a detectar y contar
-        ttk.Label(self.settings_window, text="Detectar y contar:").grid(row=2, column=0, padx=5, pady=5)
+        detect_label = ttk.Label(self.settings_window, text="Detectar y contar:")
+        detect_label.grid(row=2, column=0, padx=5, pady=5)
         self.detect_combo_setting = ttk.Combobox(self.settings_window, values=["person", "car", "motorcycle"])
         self.detect_combo_setting.grid(row=2, column=1, padx=5, pady=5)
         # Diccionario inverso para obtener el nombre de la clase actual
         class_dict_inv = {0: 'person', 2: 'car', 3: 'motorcycle'}
         current_class_id = self.classes_to_detect[0] if self.classes_to_detect else 0
         self.detect_combo_setting.set(class_dict_inv.get(current_class_id, 'person'))
+        Tooltip(detect_label, "Seleccione el tipo de objeto que desea detectar y contar.\nSolo se procesarán las detecciones de la clase seleccionada.")
 
         # Campo para ingresar cada cuántos frames procesar
-        ttk.Label(self.settings_window, text="Procesar cada N frames:").grid(row=3, column=0, padx=5, pady=5)
+        frame_skip_label = ttk.Label(self.settings_window, text="Procesar cada N frames:")
+        frame_skip_label.grid(row=3, column=0, padx=5, pady=5)
         self.frame_skip_entry = ttk.Entry(self.settings_window)
         self.frame_skip_entry.grid(row=3, column=1, padx=5, pady=5)
         self.frame_skip_entry.insert(0, str(self.frame_skip))
+        Tooltip(frame_skip_label, "Define la frecuencia de procesamiento de frames (número entero >= 1).\nUn valor de 1 procesa todos los frames (mayor precisión, menor rendimiento).\nValores mayores (ej: 5 o 10) procesan menos frames (menor precisión, mayor rendimiento) y pueden ser útiles en hardware limitado.")
 
         # Botones para guardar o cancelar los ajustes
         ttk.Button(self.settings_window, text="Guardar", command=self.save_settings).grid(row=4, column=0, padx=5, pady=5)
